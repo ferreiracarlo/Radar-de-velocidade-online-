@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Medidor de Velocidade Web</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #121212;
+            color: #fff;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h2 { margin-bottom: 10px; }
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+        }
+        video {
+            width: 100%;
+            height: auto;
+            display: block;
+            transform: scaleX(-1); /* Espelha se necessário, ajuste conforme a câmera */
+        }
+        .linha-virtual {
+            position: absolute;
+            top: 50%;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: #ff3b30;
+            box-shadow: 0 0 4px #ff3b30;
+        }
+        .controls {
+            margin-top: 15px;
+            width: 100%;
+            max-width: 400px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        input, button {
+            padding: 12px;
+            font-size: 16px;
+            border-radius: 6px;
+            border: none;
+            outline: none;
+        }
+        input { background: #2a2a2a; color: #fff; text-align: center; }
+        button { background: #007aff; color: #fff; font-weight: bold; cursor: pointer; }
+        button:active { background: #0056b3; }
+        .resultado {
+            margin-top: 15px;
+            font-size: 24px;
+            font-weight: bold;
+            color: #34c759;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>Velocímetro por Câmera</h2>
+    
+    <div class="video-container">
+        <video id="cameraStream" autoplay playsinline></video>
+        <div class="linha-virtual"></div>
+    </div>
+
+    <div class="controls">
+        <label for="distancia">Distância real entre os pontos (metros):</label>
+        <input type="number" id="distancia" value="5" step="0.5">
+        
+        <button id="btnStart" onclick="iniciarCronometro()">Marcar Início (Passou na 1ª linha)</button>
+        <button id="btnEnd" onclick="pararCronometro()" disabled>Marcar Fim (Passou na 2ª linha)</button>
+        
+        <div class="resultado" id="txtResultado">Velocidade: -- km/h</div>
+    </div>
+
+    <script>
+        let startTime = 0;
+
+        // Inicializar a câmera traseira do celular
+        async function initCamera() {
+            try {
+                const constraints = {
+                    video: { facingMode: { exact: "environment" } } // Tenta usar a câmera traseira
+                };
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                document.getElementById('cameraStream').srcObject = stream;
+            } catch (err) {
+                // Fallback caso a câmera traseira exata falhe
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                    document.getElementById('cameraStream').srcObject = stream;
+                } catch (e) {
+                    alert("Erro ao acessar a câmera: " + e);
+                }
+            }
+        }
+
+        function iniciarCronometro() {
+            startTime = performance.now();
+            document.getElementById('btnStart').disabled = true;
+            document.getElementById('btnEnd').disabled = false;
+            document.getElementById('txtResultado').innerText = "Cronometrando...";
+        }
+
+        function pararCronometro() {
+            let endTime = performance.now();
+            let tempoSegundos = (endTime - startTime) / 1000; // converte para segundos
+            
+            let distanciaMetros = parseFloat(document.getElementById('distancia').value);
+
+            if (tempoSegundos > 0 && distanciaMetros > 0) {
+                // Velocidade em metros por segundo (m/s) convertida para km/h (* 3.6)
+                let velocidadeMs = distanciaMetros / tempoSegundos;
+                let velocidadeKmh = velocidadeMs * 3.6;
+
+                document.getElementById('txtResultado').innerText = `Velocidade: ${velocidadeKmh.toFixed(2)} km/h`;
+            } else {
+                document.getElementById('txtResultado').innerText = "Erro no cálculo!";
+            }
+
+            document.getElementById('btnStart').disabled = false;
+            document.getElementById('btnEnd').disabled = true;
+        }
+
+        initCamera();
+    </script>
+</body>
+</html>
