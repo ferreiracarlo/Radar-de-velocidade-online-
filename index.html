@@ -3,139 +3,176 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Medidor de Velocidade Web</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background: #121212;
-            color: #fff;
-            margin: 0;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
-        h2 { margin-bottom: 10px; }
-        .video-container {
-            position: relative;
-            width: 100%;
-            max-width: 400px;
-            background: #000;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
-        }
-        video {
-            width: 100%;
-            height: auto;
-            display: block;
-            transform: scaleX(-1); /* Espelha se necessário, ajuste conforme a câmera */
-        }
-        .linha-virtual {
-            position: absolute;
-            top: 50%;
-            left: 0;
-            width: 100%;
-            height: 2px;
-            background: #ff3b30;
-            box-shadow: 0 0 4px #ff3b30;
-        }
-        .controls {
-            margin-top: 15px;
-            width: 100%;
-            max-width: 400px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        input, button {
-            padding: 12px;
-            font-size: 16px;
-            border-radius: 6px;
-            border: none;
-            outline: none;
-        }
-        input { background: #2a2a2a; color: #fff; text-align: center; }
-        button { background: #007aff; color: #fff; font-weight: bold; cursor: pointer; }
-        button:active { background: #0056b3; }
-        .resultado {
-            margin-top: 15px;
-            font-size: 24px;
-            font-weight: bold;
-            color: #34c759;
-            text-align: center;
-        }
-    </style>
+    <title>Radar Autônomo Web</title>
+    <link rel="stylesheet" href="style.css">
+    
+    <!-- TensorFlow.js e Modelo Coco-SSD -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
 </head>
 <body>
 
-    <h2>Velocímetro por Câmera</h2>
-    
-    <div class="video-container">
-        <video id="cameraStream" autoplay playsinline></video>
-        <div class="linha-virtual"></div>
-    </div>
+    <header>
+        <h1>Radar Web Autônomo</h1>
+        <nav>
+            <button onclick="mudarAba('radar')" id="tabRadarBtn" class="active">Radar</button>
+            <button onclick="mudarAba('config')" id="tabConfigBtn">Configurações</button>
+        </nav>
+    </header>
 
-    <div class="controls">
-        <label for="distancia">Distância real entre os pontos (metros):</label>
-        <input type="number" id="distancia" value="5" step="0.5">
-        
-        <button id="btnStart" onclick="iniciarCronometro()">Marcar Início (Passou na 1ª linha)</button>
-        <button id="btnEnd" onclick="pararCronometro()" disabled>Marcar Fim (Passou na 2ª linha)</button>
-        
-        <div class="resultado" id="txtResultado">Velocidade: -- km/h</div>
-    </div>
+    <!-- ABA RADAR -->
+    <main id="abaRadar" class="tab-content active">
+        <div class="video-container">
+            <video id="webcam" autoplay playsinline muted></video>
+            <canvas id="canvas"></canvas>
+            <div class="linha-deteccao"></div>
+        </div>
+        <div class="painel-status">
+            <div class="stat-box">
+                <span>Status:</span>
+                <strong id="statusSistema">Carregando IA...</strong>
+            </div>
+            <div class="stat-box">
+                <span>Última Velocidade:</span>
+                <strong id="txtVelocidade">-- km/h</strong>
+            </div>
+            <div class="stat-box">
+                <span>Limite da Via:</span>
+                <strong id="txtLimiteExibicao">60 km/h</strong>
+            </div>
+        </div>
+    </main>
+
+    <!-- ABA CONFIGURAÇÕES -->
+    <main id="abaConfig" class="tab-content">
+        <div class="config-card">
+            <h2>Parâmetros do Radar</h2>
+            <label for="inputLimite">Limite de Velocidade da Via (km/h):</label>
+            <input type="number" id="inputLimite" value="60" min="10" max="150">
+
+            <label for="inputDistancia">Distância de Calibração (metros):</label>
+            <input type="number" id="inputDistancia" value="5" step="0.5">
+
+            <button onclick="salvarConfiguracoes()">Salvar Alterações</button>
+            <p id="msgSucesso" class="success-msg"></p>
+        </div>
+    </main>
 
     <script>
-        let startTime = 0;
+        let video = document.getElementById('webcam');
+        let canvas = document.getElementById('canvas');
+        let ctx = canvas.getContext('2d');
+        let model = null;
+        let isDetecting = false;
 
-        // Inicializar a câmera traseira do celular
-        async function initCamera() {
-            try {
-                const constraints = {
-                    video: { facingMode: { exact: "environment" } } // Tenta usar a câmera traseira
-                };
-                const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                document.getElementById('cameraStream').srcObject = stream;
-            } catch (err) {
-                // Fallback caso a câmera traseira exata falhe
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-                    document.getElementById('cameraStream').srcObject = stream;
-                } catch (e) {
-                    alert("Erro ao acessar a câmera: " + e);
-                }
-            }
-        }
+        // Configurações do usuário
+        let limiteVelocidade = 60;
+        let distanciaRealMetros = 5.0; // Distância virtual estimada na escala de pixels
 
-        function iniciarCronometro() {
-            startTime = performance.now();
-            document.getElementById('btnStart').disabled = true;
-            document.getElementById('btnEnd').disabled = false;
-            document.getElementById('txtResultado').innerText = "Cronometrando...";
-        }
+        // Controle de rastreamento de objetos
+        let veiculosRastreados = {};
 
-        function pararCronometro() {
-            let endTime = performance.now();
-            let tempoSegundos = (endTime - startTime) / 1000; // converte para segundos
-            
-            let distanciaMetros = parseFloat(document.getElementById('distancia').value);
+        function mudarAba(aba) {
+            document.getElementById('abaRadar').classList.remove('active');
+            document.getElementById('abaConfig').classList.remove('active');
+            document.getElementById('tabRadarBtn').classList.remove('active');
+            document.getElementById('tabConfigBtn').classList.remove('active');
 
-            if (tempoSegundos > 0 && distanciaMetros > 0) {
-                // Velocidade em metros por segundo (m/s) convertida para km/h (* 3.6)
-                let velocidadeMs = distanciaMetros / tempoSegundos;
-                let velocidadeKmh = velocidadeMs * 3.6;
-
-                document.getElementById('txtResultado').innerText = `Velocidade: ${velocidadeKmh.toFixed(2)} km/h`;
+            if (aba === 'radar') {
+                document.getElementById('abaRadar').classList.add('active');
+                document.getElementById('tabRadarBtn').classList.add('active');
             } else {
-                document.getElementById('txtResultado').innerText = "Erro no cálculo!";
+                document.getElementById('abaConfig').classList.add('active');
+                document.getElementById('tabConfigBtn').classList.add('active');
             }
-
-            document.getElementById('btnStart').disabled = false;
-            document.getElementById('btnEnd').disabled = true;
         }
 
-        initCamera();
+        function salvarConfiguracoes() {
+            limiteVelocidade = parseFloat(document.getElementById('inputLimite').value);
+            distanciaRealMetros = parseFloat(document.getElementById('inputDistancia').value);
+            document.getElementById('txtLimiteExibicao').innerText = limiteVelocidade + " km/h";
+            
+            let msg = document.getElementById('msgSucesso');
+            msg.innerText = "Configurações salvas com sucesso!";
+            setTimeout(() => msg.innerText = "", 3000);
+        }
+
+        async function iniciarCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "environment", width: 640, height: 480 }
+                });
+                video.srcObject = stream;
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    carregarModeloIA();
+                };
+            } catch (err) {
+                alert("Erro ao acessar a câmera: " + err);
+            }
+        }
+
+        async function carregarModeloIA() {
+            document.getElementById('statusSistema').innerText = "Carregando modelo...";
+            model = await cocoSsd.load();
+            document.getElementById('statusSistema').innerText = "Monitorando Ativo";
+            detectarVeiculos();
+        }
+
+        async function detectarVeiculos() {
+            if (!model) return;
+
+            const predictions = await model.detect(video);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            let linhaY = canvas.height * 0.6; // Linha virtual no eixo Y
+
+            predictions.forEach(prediction => {
+                // Filtra apenas carros, motos e caminhões
+                if (['car', 'motorcycle', 'bus', 'truck'].includes(prediction.class)) {
+                    let [x, y, width, height] = prediction.bbox;
+                    let centroY = y + (height / 2);
+                    let idObjeto = Math.round(x / 50); // Agrupamento básico por posição horizontal
+
+                    // Desenha bounding box na tela
+                    ctx.strokeStyle = "#00ffcc";
+                    ctx.lineWidth = 3;
+                    ctx.strokeRect(x, y, width, height);
+                    ctx.fillStyle = "#00ffcc";
+                    ctx.font = "16px Arial";
+                    ctx.fillText(`${prediction.class}`, x, y > 20 ? y - 5 : 10);
+
+                    // Lógica de passagem pela linha virtual
+                    let agora = performance.now();
+                    if (centroY > linhaY - 10 && centroY < linhaY + 10) {
+                        if (!veiculosRastreados[idObjeto]) {
+                            veiculosRastreados[idObjeto] = { tempoInicio: agora };
+                        } else if (!veiculosRastreados[idObjeto].processado) {
+                            let tempoDecorrido = (agora - veiculosRastreados[idObjeto].tempoInicio) / 1000;
+                            if (tempoDecorrido > 0.1) {
+                                let velocidadeMs = distanciaRealMetros / tempoDecorrido;
+                                let velocidadeKmh = velocidadeMs * 3.6;
+
+                                document.getElementById('txtVelocidade').innerText = `${velocidadeKmh.toFixed(1)} km/h`;
+                                
+                                if (velocidadeKmh > limiteVelocidade) {
+                                    document.getElementById('txtVelocidade').style.color = "#ff3b30"; // Alerta de excesso
+                                } else {
+                                    document.getElementById('txtVelocidade').style.color = "#34c759";
+                                }
+
+                                veiculosRastreados[idObjeto].processado = true;
+                            }
+                        }
+                    }
+                }
+            });
+
+            requestAnimationFrame(detectarVeiculos);
+        }
+
+        iniciarCamera();
     </script>
 </body>
 </html>
