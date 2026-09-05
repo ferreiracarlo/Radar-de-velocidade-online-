@@ -3,9 +3,161 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Radar Autônomo Web</title>
-    <link rel="stylesheet" href="style.css">
-    
+    <title>Radar Web Autônomo com Captura</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; }
+        body {
+            font-family: Arial, sans-serif;
+            background: #0f172a;
+            color: #f8fafc;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        header {
+            background: #1e293b;
+            padding: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+
+        h1 { font-size: 1.2rem; margin: 0; }
+
+        nav button {
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            font-size: 1rem;
+            padding: 8px 12px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        nav button.active {
+            color: #38bdf8;
+            border-bottom: 2px solid #38bdf8;
+        }
+
+        .tab-content {
+            display: none;
+            flex: 1;
+            flex-direction: column;
+            padding: 15px;
+            box-sizing: border-box;
+            overflow-y: auto;
+        }
+
+        .tab-content.active {
+            display: flex;
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+            margin: 0 auto;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 300px;
+        }
+
+        video, canvas {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .linha-deteccao {
+            position: absolute;
+            top: 60%;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: rgba(255, 59, 48, 0.8);
+            box-shadow: 0 0 8px #ff3b30;
+            pointer-events: none;
+        }
+
+        .painel-status {
+            background: #1e293b;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+            display: flex;
+            justify-content: space-around;
+            text-align: center;
+        }
+
+        .stat-box {
+            display: flex;
+            flex-direction: column;
+            font-size: 0.9rem;
+        }
+
+        .stat-box strong {
+            font-size: 1.2rem;
+            margin-top: 5px;
+            color: #38bdf8;
+        }
+
+        .config-card {
+            background: #1e293b;
+            padding: 20px;
+            border-radius: 8px;
+            max-width: 400px;
+            margin: 0 auto;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .config-card label {
+            display: block;
+            margin-top: 15px;
+            font-size: 0.9rem;
+            color: #cbd5e1;
+        }
+
+        .config-card input {
+            width: 100%;
+            padding: 10px;
+            margin-top: 5px;
+            background: #0f172a;
+            border: 1px solid #334155;
+            color: #fff;
+            border-radius: 6px;
+            box-sizing: border-box;
+        }
+
+        .config-card button {
+            width: 100%;
+            margin-top: 20px;
+            padding: 12px;
+            background: #38bdf8;
+            color: #0f172a;
+            border: none;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .success-msg {
+            color: #34c759;
+            text-align: center;
+            margin-top: 10px;
+            font-size: 0.9rem;
+        }
+    </style>
     <!-- TensorFlow.js e Modelo Coco-SSD -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
@@ -63,11 +215,10 @@
         let canvas = document.getElementById('canvas');
         let ctx = canvas.getContext('2d');
         let model = null;
-        let isDetecting = false;
 
         // Configurações do usuário
         let limiteVelocidade = 60;
-        let distanciaRealMetros = 5.0; // Distância virtual estimada na escala de pixels
+        let distanciaRealMetros = 5.0; 
 
         // Controle de rastreamento de objetos
         let veiculosRastreados = {};
@@ -120,6 +271,19 @@
             detectarVeiculos();
         }
 
+        // Função para salvar o frame atual como imagem no dispositivo em caso de excesso de velocidade
+        function tirarPrintVeiculo(velocidade, limite) {
+            if (velocidade > limite) {
+                let link = document.createElement('a');
+                link.download = `infracao_${velocidade.toFixed(0)}kmh_${Date.now()}.png`;
+                link.href = canvas.toDataURL('image/png');
+                
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+        }
+
         async function detectarVeiculos() {
             if (!model) return;
 
@@ -129,11 +293,10 @@
             let linhaY = canvas.height * 0.6; // Linha virtual no eixo Y
 
             predictions.forEach(prediction => {
-                // Filtra apenas carros, motos e caminhões
                 if (['car', 'motorcycle', 'bus', 'truck'].includes(prediction.class)) {
                     let [x, y, width, height] = prediction.bbox;
                     let centroY = y + (height / 2);
-                    let idObjeto = Math.round(x / 50); // Agrupamento básico por posição horizontal
+                    let idObjeto = Math.round(x / 50); 
 
                     // Desenha bounding box na tela
                     ctx.strokeStyle = "#00ffcc";
@@ -157,7 +320,9 @@
                                 document.getElementById('txtVelocidade').innerText = `${velocidadeKmh.toFixed(1)} km/h`;
                                 
                                 if (velocidadeKmh > limiteVelocidade) {
-                                    document.getElementById('txtVelocidade').style.color = "#ff3b30"; // Alerta de excesso
+                                    document.getElementById('txtVelocidade').style.color = "#ff3b30";
+                                    // Aciona a captura de print do veículo infrator
+                                    tirarPrintVeiculo(velocidadeKmh, limiteVelocidade);
                                 } else {
                                     document.getElementById('txtVelocidade').style.color = "#34c759";
                                 }
